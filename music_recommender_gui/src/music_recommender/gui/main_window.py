@@ -25,7 +25,6 @@ from PyQt6.QtWidgets import (
 from ..core.config import DEFAULT_DATASET_PATH, MODELS_DIR
 from ..core.model_store import ModelFileError, default_model_filename, load_model, save_model
 from .tabs.data_tab import DataTab
-from .tabs.predict_tab import PredictTab
 from .tabs.recommend_tab import RecommendTab
 from .tabs.results_tab import ResultsTab
 from .tabs.train_tab import TrainTab
@@ -45,7 +44,6 @@ ABOUT_TEXT = (
 )
 PAGE_DESCRIPTIONS = {
     "Recommend": "Find songs with a similar sound. Start with a title or an artist.",
-    "Predict Genre": "Explore audio features and discover the genre behind a sound.",
     "Train": "Choose your data, configure the models and follow their progress.",
     "Results": "Compare classifiers and explore how your models perform.",
     "Dataset": "Get to know your catalogue, from cleaning steps to audio features.",
@@ -104,7 +102,6 @@ class MainWindow(QMainWindow):
         self.dataset_worker = None
 
         self.recommend_tab = RecommendTab()
-        self.predict_tab = PredictTab()
         self.train_tab = TrainTab()
         self.results_tab = ResultsTab()
         self.data_tab = DataTab()
@@ -112,8 +109,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.setObjectName("pages")
         self.model_pages = []
-        for page, title in ((self.recommend_tab, "Recommend"), (self.predict_tab, "Predict Genre")):
-            self._add_model_page(page, title)
+        self._add_model_page(self.recommend_tab, "Recommend")
         self.tabs.addTab(self.train_tab, "Train")
         for page, title in ((self.results_tab, "Results"), (self.data_tab, "Dataset")):
             self._add_model_page(page, title)
@@ -125,7 +121,7 @@ class MainWindow(QMainWindow):
         self.about_tab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.tabs.addTab(self.about_tab, "About")
         self.tabs.tabBar().hide()
-        for page in (self.recommend_tab, self.predict_tab, self.train_tab, self.results_tab, self.data_tab):
+        for page in (self.recommend_tab, self.train_tab, self.results_tab, self.data_tab):
             page.layout().setContentsMargins(20, 8, 20, 20)
             page.layout().setSpacing(14)
         self._build_workspace()
@@ -182,8 +178,9 @@ class MainWindow(QMainWindow):
         self.navigation = QListWidget()
         self.navigation.setObjectName("navigation")
         self.navigation.setAccessibleName("Main navigation")
+        symbols = ("♫", "⚙", "▥", "▤", "ⓘ")
         self.navigation.addItems([f"{symbol}   {self.tabs.tabText(i)}"
-                                  for i, symbol in enumerate(("♫", "≋", "⚙", "▥", "▤", "ⓘ"))])
+                                  for i, symbol in enumerate(symbols)])
         for index in range(self.navigation.count()):
             self.navigation.item(index).setSizeHint(QSize(180, 42))
         sidebar_layout.addWidget(self.navigation, 1)

@@ -16,7 +16,8 @@ htmlcov/
 .ipynb_checkpoints/
 
 # Generated model artifacts
-music_recommender_gui/models/
+music_recommender_gui/models/*.joblib
+!music_recommender_gui/models/notebook_default.joblib
 
 # Build output and OS files
 build/

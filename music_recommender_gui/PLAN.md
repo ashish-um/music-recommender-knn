@@ -75,8 +75,7 @@ Mini Project/
     │           ├── data_tab.py       dataset overview and EDA plots
     │           ├── train_tab.py      training settings, Train button, progress, log
     │           ├── results_tab.py    metrics, confusion matrix, K curve, grid results
-    │           ├── recommend_tab.py  pick a song → top-N similar songs
-    │           └── predict_tab.py    custom audio features → predicted genre + similar songs
+    │           └── recommend_tab.py  pick a song → top-N similar songs
     └── tests/
         ├── conftest.py               dataset path fixture (skip if dataset.csv missing)
         ├── test_data.py
@@ -167,7 +166,7 @@ All functions take a `TrainedModel`:
 ┌ Music Recommender (KNN) ────────────────────────────────────────────────┐
 │ File  Model  Help                                                       │
 ├─────────────────────────────────────────────────────────────────────────┤
-│ [ Recommend ] [ Predict Genre ] [ Train ] [ Results ] [ Dataset ]       │
+│ [ Recommend ] [ Train ] [ Results ] [ Dataset ]                         │
 │                                                                         │
 │                         (active tab content)                            │
 │                                                                         │
@@ -180,7 +179,7 @@ All functions take a `TrainedModel`:
   - *File*: Open Dataset…, Quit
   - *Model*: Open Model…, Save Model As…, Recent Models, Model Info
   - *Help*: About (project, syllabus, authors from the notebook's "Developed by" cell)
-- **Model state:** `MainWindow.current_model` (a `TrainedModel` or None). Setting it emits a `modelChanged` signal, and every tab updates itself from that signal. Recommend, Predict and Results are disabled, with a hint to "Train or open a model", until a model is present.
+- **Model state:** `MainWindow.current_model` (a `TrainedModel` or None). Setting it emits a `modelChanged` signal, and every tab updates itself from that signal. Recommend and Results are disabled, with a hint to "Train or open a model", until a model is present.
 - **Startup:** `QSettings` remembers the last model path, the dataset path and the window geometry. The last model is reloaded automatically if the file still exists.
 - **Style:** Fusion style, which follows the system light/dark palette. The Matplotlib figure background matches the palette.
 
@@ -203,22 +202,7 @@ Same genre: 10 / 10                                           [Export CSV]
 - Double-clicking a recommendation makes it the new input song, so you can "walk" through similar songs.
 - Right-click → *Copy* / *Open in Spotify* (`https://open.spotify.com/track/<track_id>`).
 
-### 5.3 Predict Genre tab (classifier + custom song)
-
-- A `FeatureEditor` with one slider and spin box per feature, in real units:
-  - danceability, energy and similar features: 0–1
-  - loudness: −60–0 dB
-  - tempo: 0–250 BPM
-  - duration: mm:ss
-  - mode, explicit: checkboxes
-- "Fill from song…" copies an existing song's features, so you can start from a real song and adjust it.
-- Output:
-  - Predicted genre (large label), from the tuned model, with a switch to the default model.
-  - A horizontal bar chart of the per-genre probabilities.
-  - The top-10 nearest songs to this custom feature vector.
-- It updates live, with a short debounce while sliders move.
-
-### 5.4 Train tab
+### 5.3 Train tab
 
 ```
 Dataset: [../dataset.csv                     ] [Browse]   ✓ 114,000 rows loaded
@@ -284,9 +268,8 @@ Each milestone ends in something runnable and checked before the next one starts
 | M4 | **GUI shell:** main window, menus, status bar, model state, QSettings, workers | Can open a saved model; status bar updates; tabs enable and disable correctly |
 | M5 | **Train tab** | Training runs from the GUI with live progress and log; cancel works; model can be saved |
 | M6 | **Recommend tab** | Search, recommend, metric switch, double-click to walk, export CSV |
-| M7 | **Predict tab** | Sliders → genre probabilities + nearest songs; "Fill from song" works |
-| M8 | **Results + Dataset tabs** | All notebook plots and tables shown and exportable |
-| M9 | **Polish:** README with screenshots, error handling, GUI smoke test, final pass | All tests pass; offscreen screenshots of every tab look right |
+| M7 | **Results + Dataset tabs** | All notebook plots and tables shown and exportable |
+| M8 | **Polish:** README with screenshots, error handling, GUI smoke test, final pass | All tests pass; offscreen screenshots of every page look right |
 
 ---
 
@@ -356,4 +339,4 @@ uv run music-recommender
 
 1. **Qt binding:** **PyQt6 in a uv-managed venv**, or the system PyQt5 that is already installed.
 2. **Subdirectory name:** **`music_recommender_gui/`**.
-3. **Scope:** **all five tabs** (Recommend, Predict Genre, Train, Results, Dataset). The minimum version is Train + Recommend + Results.
+3. **Scope:** current app pages are Recommend, Train, Results, Dataset and About. The Predict Genre page was removed; genre classifiers remain available in model comparison results.

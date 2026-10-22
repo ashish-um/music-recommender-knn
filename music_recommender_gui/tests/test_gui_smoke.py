@@ -34,7 +34,7 @@ def test_sidebar_navigation(app):
     window = MainWindow(autoload=False)
     window.show()
     app.processEvents()
-    assert window.navigation.count() == window.tabs.count() == 6
+    assert window.navigation.count() == window.tabs.count() == 5
     for index in range(window.navigation.count()):
         window.navigation.setCurrentRow(index)
         assert window.tabs.currentIndex() == index
@@ -51,7 +51,6 @@ def test_sidebar_navigation(app):
 
 
 def test_window_with_model(app, trained_model):
-    from music_recommender.core import recommender as rec
     from music_recommender.gui.main_window import MainWindow
 
     window = MainWindow(autoload=False)
@@ -76,27 +75,6 @@ def test_window_with_model(app, trained_model):
     tab.picker.edit.setText("Some Unknown Song zzz")
     tab.picker.choose_typed()
     assert "not present" in tab.info.text()
-
-    # Predict tab
-    predict = window.predict_tab
-    index = rec.find_song(trained_model, "Balls to the Wall")
-    predict.fill_from_song(index)
-    predict.update_prediction(predict.editor.values())
-    assert predict.predicted.text() in trained_model.genre_classes
-    assert predict.table_model.rowCount() == 10
-    assert predict.table_model.dataframe().iloc[0]["track_name"] == "Balls to the Wall"
-
-    # Locking the sliders still lets a picked song fill in its values
-    predict.edit_toggle.setChecked(False)
-    assert not predict.editor.isEnabled() and "OFF" in predict.edit_toggle.text()
-    nuvole = rec.find_song(trained_model, "Nuvole Bianche")
-    predict.fill_from_song(nuvole)
-    expected = rec.song_features(trained_model, nuvole)
-    assert predict.editor.values() == {k: expected[k] for k in trained_model.feature_cols}
-    predict.update_prediction(predict.editor.values())
-    assert predict.table_model.dataframe().iloc[0]["distance"] == 0     # exact values, not rounded
-    predict.edit_toggle.setChecked(True)
-    assert predict.editor.isEnabled()
 
     # Results and Dataset tabs draw every view
     assert window.results_tab.summary_model.rowCount() == 6
@@ -129,21 +107,21 @@ def test_compact_layouts_keep_controls_readable(app, trained_model):
     window.resize(1100, 720)
     window.set_model(trained_model)
     window.show()
-    for page in (window.recommend_tab, window.predict_tab):
-        wrapper = next(p for p in window.model_pages if p.page is page)
-        window.tabs.setCurrentWidget(wrapper)
-        app.processEvents()
-        assert page.splitter.orientation() == Qt.Orientation.Vertical
-        scroll = wrapper.currentWidget()
-        assert isinstance(scroll, QScrollArea)
-        assert scroll.horizontalScrollBar().maximum() == 0
-        assert page.plot.height() >= 280
-        assert page.picker.edit.width() >= 250
+    page = window.recommend_tab
+    wrapper = window.model_pages[0]
+    window.tabs.setCurrentWidget(wrapper)
+    app.processEvents()
+    assert page.splitter.orientation() == Qt.Orientation.Vertical
+    scroll = wrapper.currentWidget()
+    assert isinstance(scroll, QScrollArea)
+    assert scroll.horizontalScrollBar().maximum() == 0
+    assert page.plot.height() >= 280
+    assert page.picker.edit.width() >= 250
 
-    window.tabs.setCurrentWidget(window.model_pages[3])
+    window.tabs.setCurrentWidget(window.model_pages[2])
     app.processEvents()
     assert window.data_tab.top_splitter.orientation() == Qt.Orientation.Vertical
-    assert window.model_pages[3].currentWidget().horizontalScrollBar().maximum() == 0
+    assert window.model_pages[2].currentWidget().horizontalScrollBar().maximum() == 0
 
     window.tabs.setCurrentWidget(window.train_tab)
     app.processEvents()

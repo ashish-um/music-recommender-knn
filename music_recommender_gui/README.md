@@ -33,7 +33,6 @@ steppers have explicit arrow icons, and scrollbars remain visible when content o
 | Page | What it does |
 |---|---|
 | **Recommend** | Type part of a title or artist and pick a song from the list. The list shows "Title — Artist (genre)", so songs with the same name can be told apart. You get the top-N most similar songs, with same-genre rows highlighted, a "same genre: x / N" score and a chart comparing the input song's features with the recommendations. You can switch the distance metric live. Double-click a result to get recommendations for it. Right-click to copy it or open it in Spotify. **Export CSV…** saves the list. |
-| **Predict Genre** | Set the 12 audio features with sliders, or start from an existing song and adjust it. Shows the genre the KNN classifier predicts (optimized or default model), the probability of each genre, and the 10 songs closest to your custom sound. |
 | **Train** | Choose the dataset, genres (any of the 114), input features, test size, random state, scaler, default K, Precision@K, accuracy-vs-K range, CV folds and the grid search values. **Train model** runs in the background with a progress bar and a log in the notebook's output format. **Cancel** stops it, and **Restore notebook defaults** resets every setting. When training finishes, the app offers to save the model. |
 | **Results** | Before/after KNN metrics and chart; **Model comparison** table and accuracy chart for KNN, Decision Tree and Naïve Bayes, naming the highest test accuracy (including ties); confusion matrices and genre-wise reports for each classifier; accuracy vs K, cross-validation folds, and grid search results. Plot toolbars include a **save** button for report figures. |
 | **Dataset** | Size of the original dataset, the number of songs after each cleaning step, and the notebook's plots: songs per genre, histograms, boxplots by genre (any feature), duration boxplot, correlation heatmap, plus average features by genre. Includes a searchable table of every song the model uses. |
@@ -103,8 +102,8 @@ The comparison reports the best **tested configuration on this test set**. Only 
 is tuned, so it is not an equally tuned comparison of model families. Test accuracy
 is descriptive; use training-set cross-validation for further model selection rather
 than repeatedly tuning on the test set. These scores measure genre prediction,
-not listener satisfaction. Song recommendations and the Predict Genre page continue
-using KNN; recommendation quality is measured separately by Precision@K.
+not listener satisfaction. KNN provides song recommendations; recommendation quality
+is measured separately by Precision@K.
 
 ## Tests
 
@@ -123,5 +122,4 @@ The tests need `../dataset.csv` and are skipped if it is missing. They check tha
 ## Notes
 
 - **Grid search** runs in a loop that gives the same result as `GridSearchCV`, but reports progress after each of the 270 fits so it can show a progress bar and be cancelled. A full training run takes about 15–20 seconds on all CPU cores.
-- **Predict Genre on an existing song:** if the song is one of the 80% training songs, it is its own nearest neighbour at distance 0. The optimized model weights votes by 1/distance, so it predicts that song's labelled genre with 100% probability. Move the sliders a little to see the real prediction.
 - **Wayland:** if the window does not appear, try `QT_QPA_PLATFORM=xcb uv run music-recommender`.
