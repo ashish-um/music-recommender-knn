@@ -16,7 +16,19 @@ You need [uv](https://docs.astral.sh/uv/) and the dataset file `dataset.csv` in 
 cd music_recommender_gui
 uv sync                    # creates .venv and installs PyQt6, scikit-learn, pandas, ...
 uv run music-recommender   # or: uv run python -m music_recommender
+uv run streamlit run src/music_recommender/streamlit_app.py  # browser interface
 ```
+
+The Streamlit interface reuses the same model files and training pipeline. It includes
+song recommendations with distance and scaled-feature charts, classifier evaluation
+and confusion-matrix plots, catalogue exploration, and model training. It reads
+`dataset.csv` from the usual project location or accepts a CSV upload.
+After training, a save dialog lets you choose the model file name and local path.
+The Recommend page can also search YouTube for the selected song and embed the first
+match. This uses yt-dlp without an API key; results can be inaccurate or unavailable
+for embedding, and YouTube may change the page format used for search.
+Settings are saved locally in `~/.music-recommender/settings.json` and retained when
+the app or a model is reopened.
 
 A model trained with the notebook settings is included at `models/notebook_default.joblib`. Open it with **Model → Open Model…** to use the app without training first. The app remembers the last model and reopens it on the next start.
 
