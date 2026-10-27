@@ -67,7 +67,7 @@ def test_window_with_model(app, trained_model):
     assert "10 / 10" in tab.summary.text()
     tab.top_n.setValue(20)
     assert tab.table_model.rowCount() == 20
-    tab.metric.setCurrentIndex(tab.metric.findData("cosine"))
+    tab.metric.setCurrentIndex(tab.metric.findData("euclidean"))
     assert tab.table_model.rowCount() == 20
     first = int(tab.result["song_index"].iloc[0])
     tab.use_row_as_input(0)
@@ -81,8 +81,8 @@ def test_window_with_model(app, trained_model):
     comparison = window.results_tab.classifier_model.dataframe()
     assert window.results_tab.views.currentItem().text() == "Model comparison"
     assert len(comparison) == 3
-    assert comparison["Accuracy"].is_monotonic_decreasing
-    winners = comparison.loc[comparison["Accuracy"] == comparison["Accuracy"].max(), "Model"]
+    assert comparison["Precision@10"].is_monotonic_decreasing
+    winners = comparison.loc[comparison["Precision@10"] == comparison["Precision@10"].max(), "Model"]
     assert all(name in window.results_tab.classifier_note.text() for name in winners)
     from PyQt6.QtWidgets import QRadioButton
     for button in window.results_tab.findChildren(QRadioButton):
@@ -151,17 +151,14 @@ def test_older_model_has_no_comparison(app, trained_model):
     from music_recommender.gui.tabs.results_tab import ResultsTab
     from PyQt6.QtWidgets import QRadioButton
 
-    old_results = {k: v for k, v in trained_model.results.items() if k != "model_comparison"}
+    old_results = {k: v for k, v in trained_model.results.items() if k != "recommendation_comparison"}
     tab = ResultsTab()
     tab.set_model(trained_model)
     tab.set_model(replace(trained_model, results=old_results))
     assert tab.classifier_model.rowCount() == 0
     assert tab.views.currentItem().text() == "Summary"
     assert "Retrain" in tab.classifier_note.text()
-    for button in tab.findChildren(QRadioButton):
-        if button.text() == "Decision Tree":
-            button.setChecked(True)
-    assert tab.report_model.rowCount() == 0
+    assert tab.report_model.rowCount() == 7
     tab.close()
 
 
@@ -173,8 +170,8 @@ def test_train_tab_runs_training(app, raw_df):
     tab.set_dataset(raw_df, str(DEFAULT_DATASET_PATH))
     tab.set_config(TrainingConfig(genres=["classical", "heavy-metal", "jazz"], run_k_sweep=False,
                                   param_grid={"n_neighbors": [5, 15], "weights": ["distance"],
-                                              "metric": ["euclidean", "manhattan"]}))
-    assert "4 combinations" in tab.grid_size.text()
+                                              "metric": ["euclidean"]}))
+    assert "2 combinations" in tab.grid_size.text()
     results = []
     tab.trainingFinished.connect(results.append)
     tab.start_training()

@@ -47,7 +47,8 @@ def _checked_items(widget: QListWidget) -> list[str]:
 
 
 def _set_checked(widget: QListWidget, names):
-    names = set(names)
+    names = (set(names) if names is not None else
+             {widget.item(i).data(Qt.ItemDataRole.UserRole) for i in range(widget.count())})
     for i in range(widget.count()):
         item = widget.item(i)
         item.setCheckState(Qt.CheckState.Checked if item.data(Qt.ItemDataRole.UserRole) in names
@@ -178,7 +179,8 @@ class TrainTab(QWidget):
         self.genre_list.itemChanged.connect(self._update_genre_count)
         self.genre_count = QLabel()
         genre_buttons = QHBoxLayout()
-        for text, action in (("Notebook 7", lambda: _set_checked(self.genre_list, DEFAULT_GENRES)),
+        for text, action in (("Default 7", lambda: _set_checked(self.genre_list, DEFAULT_GENRES)),
+                             ("All", lambda: _set_checked(self.genre_list, None)),
                              ("None", lambda: _set_checked(self.genre_list, []))):
             button = QPushButton(text)
             button.clicked.connect(action)
@@ -258,6 +260,7 @@ class TrainTab(QWidget):
         self.k_values.setToolTip("Comma-separated values of K to try.")
         self.weight_checks = {w: QCheckBox(w) for w in WEIGHTS}
         self.metric_checks = {m: QCheckBox(m) for m in METRICS}
+        self.metric_checks["euclidean"].setEnabled(False)
         self.grid_size = QLabel()
         self.n_jobs = QComboBox()
         self.n_jobs.addItem("All cores", -1)
@@ -282,7 +285,7 @@ class TrainTab(QWidget):
         layout.addWidget(QLabel("CPU cores:"), 6, 0)
         layout.addWidget(self.n_jobs, 6, 1, 1, 2)
 
-        grid_controls = [self.k_values, *self.weight_checks.values(), *self.metric_checks.values()]
+        grid_controls = [self.k_values, *self.weight_checks.values()]
         self.run_grid.toggled.connect(lambda on: [w.setEnabled(on) for w in grid_controls])
         for widget in (self.run_grid, *self.weight_checks.values(), *self.metric_checks.values()):
             widget.toggled.connect(self._update_grid_size)
@@ -376,7 +379,7 @@ class TrainTab(QWidget):
         for name, check in self.weight_checks.items():
             check.setChecked(name in config.param_grid["weights"])
         for name, check in self.metric_checks.items():
-            check.setChecked(name in config.param_grid["metric"])
+            check.setChecked(True)
         self.n_jobs.setCurrentIndex(max(0, self.n_jobs.findData(config.n_jobs)))
         self._update_genre_count()
         self._update_grid_size()

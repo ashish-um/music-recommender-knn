@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-from sklearn.neighbors import NearestNeighbors
 
 from .config import ALL_FEATURES
 from .model_store import TrainedModel
@@ -43,10 +42,11 @@ def find_song(model: TrainedModel, name: str, artist: str | None = None) -> int 
 
 
 def _neighbours_model(model: TrainedModel, metric: str | None):
-    if metric is None or metric == model.recommender_metric:
-        return model.recommender
-    # Refitting on ~5,000 songs takes milliseconds, so other metrics can be compared live.
-    return NearestNeighbors(metric=metric).fit(model.catalogue_scaled)
+    if metric not in (None, "euclidean"):
+        raise ValueError("Only Euclidean distance is supported.")
+    if model.recommender_metric != "euclidean":
+        raise ValueError("Retrain this model using Euclidean distance.")
+    return model.recommender
 
 
 def _result_table(model: TrainedModel, indices, distances, input_genre=None) -> pd.DataFrame:
@@ -58,13 +58,22 @@ def _result_table(model: TrainedModel, indices, distances, input_genre=None) -> 
     return result.reset_index().rename(columns={"index": "song_index"})
 
 
-def recommend(model: TrainedModel, song_index: int, n: int = 10, metric: str | None = None) -> pd.DataFrame:
+def recommend(model: TrainedModel, song_index: int, n: int = 10, metric: str | None = None,
+              method: str = "KNN") -> pd.DataFrame:
     """Top-n songs closest to the catalogue song at song_index, excluding the song itself."""
-    nn = _neighbours_model(model, metric)
-    n_query = min(n + 1, model.n_songs)
-    distances, indices = nn.kneighbors(model.catalogue_scaled[[song_index]], n_neighbors=n_query)
-    keep = indices[0] != song_index
-    indices, distances = indices[0][keep][:n], distances[0][keep][:n]
+    if method == "KNN":
+        nn = _neighbours_model(model, metric)
+        n_query = min(n + 1, model.n_songs)
+        distances, indices = nn.kneighbors(model.catalogue_scaled[[song_index]], n_neighbors=n_query)
+        keep = indices[0] != song_index
+        indices, distances = indices[0][keep][:n], distances[0][keep][:n]
+    else:
+        cluster = getattr(model, "cluster_models", {}).get(method)
+        if cluster is None:
+            raise ValueError(f"{method} is unavailable in this model. Retrain to add clustering models.")
+        distances, indices = cluster.recommend(
+            model.catalogue_scaled, model.catalogue_scaled[[song_index]], n,
+            metric or "euclidean", cluster=cluster.labels[song_index], exclude=song_index)
     genre = model.catalogue.at[song_index, "track_genre"]
     return _result_table(model, indices, distances, genre)
 
@@ -75,11 +84,24 @@ def _scale_features(model: TrainedModel, features: dict) -> np.ndarray:
 
 
 def recommend_from_features(model: TrainedModel, features: dict, n: int = 10,
-                            metric: str | None = None) -> pd.DataFrame:
+                            metric: str | None = None, method: str = "KNN") -> pd.DataFrame:
     """Top-n songs closest to a custom set of audio features."""
-    nn = _neighbours_model(model, metric)
-    distances, indices = nn.kneighbors(_scale_features(model, features), n_neighbors=min(n, model.n_songs))
-    return _result_table(model, indices[0], distances[0])
+    query = _scale_features(model, features)
+    encoder = getattr(model, "genre_feature_encoder", None)
+    if encoder is not None:
+        genre = features.get("track_genre")
+        if genre not in model.genre_classes:
+            raise ValueError("Provide track_genre from the trained catalogue for recommendations.")
+        query = np.hstack([query, encoder.transform(pd.DataFrame({"track_genre": [genre]}))])
+    if method == "KNN":
+        nn = _neighbours_model(model, metric)
+        distances, indices = nn.kneighbors(query, n_neighbors=min(n, model.n_songs))
+        return _result_table(model, indices[0], distances[0])
+    cluster = getattr(model, "cluster_models", {}).get(method)
+    if cluster is None:
+        raise ValueError(f"{method} is unavailable in this model. Retrain to add clustering models.")
+    distances, indices = cluster.recommend(model.catalogue_scaled, query, n, metric or "euclidean")
+    return _result_table(model, indices, distances)
 
 
 def predict_genre(model: TrainedModel, features: dict, which: str = "tuned") -> tuple[str, dict]:
@@ -94,4 +116,4 @@ def predict_genre(model: TrainedModel, features: dict, which: str = "tuned") -> 
 def song_features(model: TrainedModel, song_index: int) -> dict:
     """Raw feature values of a catalogue song."""
     row = model.catalogue.loc[song_index]
-    return {col: float(row[col]) for col in ALL_FEATURES}
+    return {**{col: float(row[col]) for col in ALL_FEATURES}, "track_genre": row["track_genre"]}

@@ -113,7 +113,7 @@ class DataTab(QWidget):
             f"<b>Original dataset:</b> {raw['rows']:,} songs, {raw['columns']} columns, "
             f"{raw['genres']} genres, {raw['missing']} missing values.<br>"
             f"<b>Used by this model:</b> {model.n_songs:,} songs in {len(model.genre_classes)} genres, "
-            f"{len(model.feature_cols)} input features.<br>"
+            f"{len(model.recommendation_feature_cols)} input features.<br>"
             f"<b>Split:</b> {split['train']:,} training / {split['test']:,} testing songs."
         )
         steps = pd.DataFrame(cleaning.steps, columns=["Step", "Songs"])

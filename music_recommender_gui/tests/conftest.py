@@ -14,9 +14,14 @@ def raw_df():
 
 
 @pytest.fixture(scope="session")
-def trained_model(raw_df):
-    """The model trained with notebook defaults (takes ~20 s, shared by all tests)."""
-    return run_training(TrainingConfig(), raw_df=raw_df)
+def example_genres():
+    return ["classical", "hip-hop", "heavy-metal", "edm", "jazz", "country", "pop"]
+
+
+@pytest.fixture(scope="session")
+def trained_model(raw_df, example_genres):
+    """Use an explicit small subset for fast regression checks."""
+    return run_training(TrainingConfig(genres=example_genres), raw_df=raw_df)
 
 
 @pytest.fixture(scope="session")

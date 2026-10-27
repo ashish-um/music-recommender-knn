@@ -7,6 +7,7 @@ import tempfile
 import re
 
 import matplotlib.pyplot as plt
+from scipy.cluster.hierarchy import dendrogram
 import pandas as pd
 import seaborn as sns
 import streamlit as st
@@ -15,7 +16,7 @@ from yt_dlp import YoutubeDL
 from music_recommender.core import data, recommender as rec
 from music_recommender.core.config import (
     ALL_FEATURES, AUDIO_FEATURES, DEFAULT_FEATURES, DEFAULT_GENRES,
-    DEFAULT_DATASET_PATH, METRICS, MODELS_DIR, TrainingConfig,
+    DEFAULT_DATASET_PATH, MODELS_DIR, TrainingConfig,
 )
 from music_recommender.core.model_store import default_model_filename, load_model, save_model
 from music_recommender.core.training import Reporter, run_training
@@ -25,7 +26,6 @@ SETTING_DEFAULTS = {
     "show_track_id": True,
     "show_same_genre": True,
     "show_recommendation_distance_chart": True,
-    "show_recommendation_profile_chart": True,
 }
 SETTINGS_FILE = Path.home() / ".music-recommender" / "settings.json"
 
@@ -82,7 +82,8 @@ def _show_results(model):
     if "precision_at_k" in tuned:
         cards[4].metric(f"Precision@{precision_k}", f"{tuned['precision_at_k']:.1%}")
 
-    summary_tab, classifier_tab, tuning_tab = st.tabs(["Summary", "Classifier details", "Tuning"])
+    summary_tab, classifier_tab, clustering_tab, tuning_tab = st.tabs(
+        ["Recommendation comparison", "KNN genre evaluation", "Clustering graphs", "KNN tuning"])
     with summary_tab:
         default_metrics = results.get("default", {}).get("metrics", {})
         knn_rows = [{"Metric": name, "Default KNN": default_metrics[name], "Optimized KNN": metrics[name]}
@@ -96,28 +97,32 @@ def _show_results(model):
             st.subheader("Default vs optimized KNN")
             st.bar_chart(pd.DataFrame(knn_rows).set_index("Metric"), y_label="Score")
 
-        comparison = results.get("model_comparison") or {"Default KNN": results.get("default", {}),
-                                                          "Optimized KNN": tuned}
-        rows = pd.DataFrame({name: item.get("metrics", {}) for name, item in comparison.items()}).T
-        if not rows.empty and "Accuracy" in rows:
-            st.subheader("Compare classifiers")
-            available_metrics = [name for name in ("Accuracy", "Precision", "Recall", "F1-Score")
-                                 if name in rows.columns]
-            metric = st.selectbox("Metric to compare", available_metrics, key="classifier_comparison_metric")
-            left, right = st.columns([1, 1.3])
-            left.bar_chart(rows[metric].sort_values(ascending=False), y_label=metric)
-            right.dataframe(rows.style.format("{:.3f}").highlight_max(axis=0), use_container_width=True)
-            best = rows[metric].max()
-            winners = ", ".join(rows.index[rows[metric] == best])
-            st.caption(f"Best {metric.lower()}: {winners} ({best:.1%}).")
-            st.caption("These scores measure genre prediction on the held-out test set.")
+        comparison = results.get("recommendation_comparison")
+        if comparison:
+            st.subheader("KNN vs K-Means vs hierarchical recommendations")
+            rows = comparison["table"].set_index("Model")
+            score = f"Precision@{comparison['k']}"
+            coverage = f"Coverage@{comparison['k']}"
+            st.caption(f"Same {comparison['train_songs']:,} training songs and "
+                       f"{comparison['test_songs']:,} held-out test songs for all three methods. "
+                       f"{comparison['n_clusters']} clusters; {comparison['metric']} distance for ranking.")
+            left, right = st.columns(2)
+            left.bar_chart(rows[[score, coverage]], y_label="Fraction")
+            right.bar_chart(rows["Query ms/song"], y_label="Milliseconds per test song")
+            st.dataframe(rows.style.format("{:.4f}").highlight_max(subset=[score, coverage])
+                         .highlight_min(subset=["Fit seconds", "Query ms/song"]), use_container_width=True)
+            winners = ", ".join(rows.index[rows[score] == rows[score].max()])
+            st.caption(f"Highest {score}: {winners} ({rows[score].max():.1%}). "
+                       "Genre is also an input feature, so Precision@K measures genre consistency rather than independent recommendation quality or listening preference. "
+                       "Coverage is the fraction of requested recommendations returned; missing slots count as misses. "
+                       "Fit time excludes elbow diagnostics; query time includes cluster assignment.")
         else:
-            st.info("This saved model has no Decision Tree or Naïve Bayes comparison. Load a comparison model or train a new one.")
+            st.info("Retrain this saved model to compare KNN, K-Means and hierarchical recommendations.")
 
     with classifier_tab:
+        st.caption("Accuracy, precision, recall and F1 below describe KNN genre prediction. "
+                   "Cluster numbers are not genre labels; recommendation scores are compared in the first tab.")
         classifiers = {"Default KNN": results.get("default"), "Optimized KNN": tuned}
-        classifiers.update({name: item for name, item in results.get("model_comparison", {}).items()
-                            if name != "KNN"})
         classifiers = {name: item for name, item in classifiers.items() if item and "confusion_matrix" in item}
         selected = st.selectbox("Classifier", list(classifiers))
         report = classifiers[selected]
@@ -135,6 +140,52 @@ def _show_results(model):
             st.subheader("Per-genre scores")
             st.dataframe(report["per_class"].sort_values("f1-score"),
                          use_container_width=True, height=420)
+
+    with clustering_tab:
+        diagnostics = results.get("clustering")
+        if diagnostics:
+            st.caption("Clusters use scaled audio features and one-hot genre inputs. K-Means uses Euclidean "
+                       "distance; hierarchical clustering uses Ward linkage. New songs are assigned to the "
+                       "nearest cluster centroid. Both methods rank songs within the selected cluster.")
+            left, right = st.columns(2)
+            with left:
+                fig, ax = plt.subplots(figsize=(7, 4))
+                elbow = diagnostics["elbow"]
+                ax.plot(elbow["Clusters"], elbow["Inertia"], marker="o")
+                selection = comparison.get("cluster_selection", "manual")
+                detected = comparison.get("detected_clusters")
+                ax.axvline(comparison["n_clusters"], linestyle="--", color="#ff4b4b",
+                           label=f"Used: {comparison['n_clusters']} ({selection})")
+                if detected is not None and detected != comparison["n_clusters"]:
+                    ax.axvline(detected, linestyle=":", color="#2a9d6f", label=f"Detected elbow: {detected}")
+                ax.set(title="K-Means elbow plot", xlabel="Number of clusters", ylabel="Within-cluster squared distance")
+                ax.legend()
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
+                if selection == "elbow":
+                    st.caption(f"Automatically selected {comparison['n_clusters']} clusters from the largest "
+                               "normalized bend in the training inertia curve. Both clustering methods use this count.")
+                elif selection == "fallback":
+                    st.caption("No elbow could be detected; training used 2 clusters as a fallback.")
+                else:
+                    st.caption("The entered cluster count overrides elbow detection. "
+                               "Leave Number of clusters blank in Train to select it automatically.")
+            with right:
+                fig, ax = plt.subplots(figsize=(8, 4))
+                dendrogram(diagnostics["linkage"], truncate_mode="lastp", p=25,
+                           show_leaf_counts=True, ax=ax)
+                ax.set(title="Hierarchical dendrogram (last 25 groups)",
+                       xlabel="Training songs or merged groups (counts in parentheses)", ylabel="Ward merge distance")
+                ax.tick_params(axis="x", rotation=90)
+                fig.tight_layout()
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
+                st.caption("Branches show groups joining. A larger merge height means more dissimilar groups.")
+            st.subheader("Training songs per cluster")
+            st.bar_chart(diagnostics["cluster_sizes"].rename_axis("Cluster"), y_label="Songs")
+            st.caption("Cluster numbers are arbitrary and do not correspond across the two methods.")
+        else:
+            st.info("Retrain to generate an elbow plot, dendrogram and cluster sizes.")
 
     with tuning_tab:
         if "k_sweep" in results:
@@ -166,7 +217,7 @@ def _show_dataset(model):
         cards = st.columns(4)
         cards[0].metric("Songs used", f"{len(catalogue):,}")
         cards[1].metric("Genres", catalogue["track_genre"].nunique())
-        cards[2].metric("Features", len(model.feature_cols))
+        cards[2].metric("Recommendation features", len(model.recommendation_feature_cols))
         cards[3].metric("Original rows", f"{summary.get('rows', len(catalogue)):,}")
         left, right = st.columns([1.2, 1])
         with left:
@@ -225,11 +276,21 @@ def _show_recommendations(model):
     with left:
         choice = st.selectbox("Choose a song", options, key="recommend_song_picker")
         index = options.index(choice)
+        methods = ["KNN", *getattr(model, "cluster_models", {})]
+        method = st.selectbox("Recommendation model", methods)
+        if getattr(model, "genre_feature_encoder", None) is not None:
+            st.caption("Inputs: scaled audio features and one-hot genre. Different genres add to Euclidean distance.")
+        else:
+            st.info("This saved model uses audio only. Retrain to include genre in recommendations.")
+        if len(methods) == 1:
+            st.caption("Retrain to enable K-Means and hierarchical recommendations.")
         col1, col2 = st.columns(2)
         count = col1.slider("Recommendations", 1, 50, 10)
-        metric = col2.selectbox("Distance metric", ["Model default"] + METRICS)
-        metric = None if metric == "Model default" else metric
-        result = rec.recommend(model, index, count, metric)
+        col2.caption("Distance: Euclidean")
+        metric = "euclidean"
+        result = rec.recommend(model, index, count, metric, method=method)
+        if len(result) < count:
+            st.info(f"This cluster has only {len(result)} other songs. Try KNN or fewer clusters for more results.")
         same = int(result["same_genre"].sum())
         st.caption(f"{same} of {len(result)} share the input genre; lower distance means more similar. "
                    "Select a row to use that song as the new input.")
@@ -239,7 +300,7 @@ def _show_recommendations(model):
                   if not st.session_state[setting]]
         st.session_state.recommendation_song_indices = result["song_index"].tolist()
         st.session_state.recommendation_song_labels = options
-        st.session_state.recommendation_table_key = f"recommended_songs_{index}"
+        st.session_state.recommendation_table_key = f"recommended_songs_{method}_{index}"
         st.dataframe(result.drop(columns=["song_index", *hidden]), use_container_width=True,
                      key=st.session_state.recommendation_table_key, on_select=_select_recommended_song,
                      selection_mode="single-row")
@@ -253,13 +314,6 @@ def _show_recommendations(model):
             fig.tight_layout()
             st.pyplot(fig, use_container_width=True)
             plt.close(fig)
-        if st.session_state["show_recommendation_profile_chart"]:
-            features = model.feature_cols
-            input_values = model.catalogue_scaled[index]
-            average = model.catalogue_scaled[result["song_index"].to_numpy()].mean(axis=0)
-            profile = pd.DataFrame({"Input song": input_values, "Top recommendations average": average}, index=features)
-            st.subheader("Audio feature profile (scaled)")
-            st.bar_chart(profile, y_label="Scaled value")
         st.download_button("Download recommendations as CSV",
                            result.drop(columns="song_index").to_csv(index=False),
                            "recommendations.csv", "text/csv")
@@ -342,21 +396,32 @@ def _show_training():
     raw = st.session_state.raw_df
     genres = sorted(raw["track_genre"].dropna().unique().tolist())
     chosen_genres = st.multiselect("Genres", genres, default=[g for g in DEFAULT_GENRES if g in genres])
-    features = st.multiselect("Input features", ALL_FEATURES,
+    features = st.multiselect("Audio input features", ALL_FEATURES,
                               default=[f for f in DEFAULT_FEATURES if f in raw.columns])
+    st.caption("Genre is automatically added as one-hot input columns for all recommendation methods. "
+               "The separate genre classifier uses audio features only.")
     c1, c2, c3 = st.columns(3)
     test_size = c1.slider("Test set size", .05, .5, .2, .05)
     default_k = c2.number_input("Default K", 1, 200, 5)
     precision_k = c3.number_input("Precision@K", 1, 50, 10)
     c4, c5, c6 = st.columns(3)
     run_cv = c4.checkbox("Cross-validation", True)
-    run_grid = c5.checkbox("Grid search (270 fits)", True)
+    run_grid = c5.checkbox("Grid search (90 fits)", True)
     run_sweep = c6.checkbox("Accuracy by K", True)
+    n_clusters = st.number_input("Number of clusters", min_value=2, max_value=100,
+                                 value=None, placeholder="Automatic (elbow detection)",
+                                 key="training_cluster_count",
+                                 help="Leave blank to detect the elbow from training data. Enter a value to override it. "
+                                      "Both K-Means and Ward hierarchical clustering use the selected count.")
+    st.caption("The recommendation comparison uses the same sample of at most 5,000 training and 1,000 test songs "
+               "for all methods. Clustering learns from that training sample; other catalogue songs use "
+               "nearest-centroid assignment. Genre is included in cluster formation and retrieval; "
+               "Precision@K therefore reports genre consistency.")
     if st.button("Train model", type="primary"):
         config = TrainingConfig(dataset_path=str(DEFAULT_DATASET_PATH), genres=chosen_genres,
                                 features=features, test_size=test_size, default_k=int(default_k),
                                 precision_k=int(precision_k), run_cv=run_cv, run_grid_search=run_grid,
-                                run_k_sweep=run_sweep)
+                                run_k_sweep=run_sweep, n_clusters=int(n_clusters) if n_clusters is not None else None)
         problems = config.validate()
         if problems:
             st.error("\n".join(problems))
@@ -364,7 +429,9 @@ def _show_training():
         progress, stage, log = st.progress(0), st.empty(), st.empty()
         try:
             st.session_state.model = run_training(config, StreamlitReporter(progress, stage, log), raw_df=raw)
-            st.success("Training complete.")
+            comparison = st.session_state.model.results["recommendation_comparison"]
+            st.success(f"Training complete. Using {comparison['n_clusters']} clusters "
+                       f"({comparison['cluster_selection']}).")
             st.session_state.model_save_path = str(MODELS_DIR / default_model_filename())
             st.session_state.pop("saved_model_path", None)
             st.session_state.show_model_save_dialog = True
@@ -380,7 +447,7 @@ def main():
         st.session_state.update(SETTING_DEFAULTS | _load_settings())
         st.session_state.settings_loaded = True
     st.title("🎵 Music Recommender")
-    st.caption("Find similar songs, train genre classifiers, and explore the catalogue.")
+    st.caption("Compare KNN, K-Means and hierarchical song recommendations, and explore the catalogue.")
     with st.sidebar:
         st.header("Model")
         models_dir = Path(__file__).resolve().parents[2] / "models"
@@ -420,17 +487,14 @@ def main():
         for column, name in zip(team, ("Ashish Umrao (4315)", "Abhijeet Kumar (4301)", "Aryan Singh (4313)")):
             with column.container(border=True):
                 st.markdown(f"### {name}")
-        st.header("Music Recommendation System using K-Nearest Neighbors")
-        st.write("A mini project for recommending similar songs and evaluating music genre classifiers.")
+        st.header("Music Recommendation System using KNN and Clustering")
+        st.write("A mini project comparing KNN, K-Means and hierarchical recommendations using audio features and genre.")
         st.markdown("**Features**\n\n"
-                    "- Train KNN models and compare them with Decision Tree and Naïve Bayes.\n"
+                    "- Train KNN, K-Means and hierarchical models and compare recommendation Precision@K.\n"
                     "- Explore recommendations, model metrics, and the cleaned song catalogue.\n"
                     "- Play the first YouTube search match for a selected song.")
         with st.container(border=True):
-            st.markdown("**Submitted to**")
-            st.markdown("### Savitribai Phule Pune University")
-            st.caption("Third Year Information Technology · 2024 Course")
-            st.info("Checked by: Prof. Vaishali Ingle", icon="👩‍🏫")
+            st.info("### Checked by: **Prof. Vaishali Ingle**")
     with pages[1]:
         if model:
             _show_recommendations(model)
@@ -455,7 +519,6 @@ def main():
         st.checkbox("Show same genre", key="show_same_genre", on_change=_save_settings)
         st.subheader("Recommendation graphs")
         st.checkbox("Show recommendation distance chart", key="show_recommendation_distance_chart", on_change=_save_settings)
-        st.checkbox("Show audio feature profile", key="show_recommendation_profile_chart", on_change=_save_settings)
         if st.session_state.get("settings_save_error"):
             st.error(f"Could not save settings: {st.session_state.settings_save_error}")
     if st.session_state.get("show_model_save_dialog") and st.session_state.get("model"):

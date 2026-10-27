@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+from dataclasses import replace
 from joblib import Parallel, delayed
 from scipy.stats import rankdata
 from sklearn.base import clone
@@ -12,11 +13,10 @@ from sklearn.model_selection import (
     train_test_split,
 )
 from sklearn.neighbors import KNeighborsClassifier, NearestNeighbors
-from sklearn.naive_bayes import GaussianNB
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.preprocessing import MinMaxScaler, StandardScaler, OneHotEncoder
 
 from . import data, evaluation
+from .clustering import compare_recommenders
 from .config import ALL_FEATURES, INFO_COLUMNS, TrainingConfig
 from .model_store import TrainedModel
 
@@ -60,8 +60,10 @@ def _fit_and_score(estimator, params, X, y, train_idx, test_idx):
 
 
 def grid_search(X, y, param_grid, cv_folds, n_jobs, reporter, start, end) -> tuple[dict, pd.DataFrame, float]:
-    """Same result as GridSearchCV(KNeighborsClassifier(), param_grid, cv=cv_folds),
+    """Same result as GridSearchCV(KNeighborsClassifier(metric="euclidean"), param_grid, cv=cv_folds),
     but reports progress after every fit and can be cancelled."""
+    if param_grid.get("metric") != ["euclidean"]:
+        raise ValueError("Only Euclidean distance is supported.")
     candidates = list(ParameterGrid(param_grid))
     folds = list(StratifiedKFold(n_splits=cv_folds).split(X, y))
     tasks = [(params, train_idx, test_idx) for params in candidates for train_idx, test_idx in folds]
@@ -69,7 +71,7 @@ def grid_search(X, y, param_grid, cv_folds, n_jobs, reporter, start, end) -> tup
     reporter.log(f"Fitting {cv_folds} folds for each of {len(candidates)} candidates, "
                  f"totalling {total} fits")
 
-    estimator = KNeighborsClassifier()
+    estimator = KNeighborsClassifier(metric="euclidean")
     scores = []
     jobs = (delayed(_fit_and_score)(estimator, p, X, y, tr, te) for p, tr, te in tasks)
     for score in Parallel(n_jobs=n_jobs, return_as="generator")(jobs):
@@ -124,6 +126,10 @@ def run_training(config: TrainingConfig, reporter: Reporter | None = None, raw_d
     reporter.stage("Loading dataset", 0)
     if raw_df is None:
         raw_df = data.load_dataset(config.dataset_path)
+    if config.genres is None:
+        config = replace(config, genres=sorted(raw_df["track_genre"].dropna().unique().tolist()))
+        if len(config.genres) < 2:
+            raise ValueError("Select at least 2 genres.")
     results["raw_summary"] = data.dataset_summary(raw_df)
     reporter.log("#### LOADING DATASET")
     reporter.log(f"Number of samples:  {raw_df.shape[0]}")
@@ -177,11 +183,20 @@ def run_training(config: TrainingConfig, reporter: Reporter | None = None, raw_d
     y_train_arr = y_train.to_numpy()
     y_test_arr = y_test.to_numpy()
     reporter.log(f"Scaler: {type(scaler).__name__} (fitted on training data only)")
+    genre_feature_encoder = OneHotEncoder(categories=[class_names], sparse_output=False,
+                                         handle_unknown="error")
+    train_genres = df.loc[X_train.index, ["track_genre"]]
+    test_genres = df.loc[X_test.index, ["track_genre"]]
+    genre_feature_encoder.fit(train_genres)
+    X_train_recommend = np.hstack([X_train_scaled, genre_feature_encoder.transform(train_genres)])
+    X_test_recommend = np.hstack([X_test_scaled, genre_feature_encoder.transform(test_genres)])
+    reporter.log(f"Recommendation features: {len(config.features)} audio + {n_classes} one-hot genre columns. "
+                 "Genre classification uses audio only.")
     _check_cancel(reporter)
 
     # 6. Default KNN classifier
     reporter.stage("Training default KNN", 16)
-    default_clf = KNeighborsClassifier(n_neighbors=config.default_k)
+    default_clf = KNeighborsClassifier(n_neighbors=config.default_k, metric="euclidean")
     default_clf.fit(X_train_scaled, y_train_arr)
     results["default"] = _evaluate(default_clf, X_test_scaled, y_test_arr, n_classes, class_names)
     reporter.log(f"\n#### DEFAULT KNN (K = {config.default_k}, euclidean, uniform)")
@@ -191,7 +206,7 @@ def run_training(config: TrainingConfig, reporter: Reporter | None = None, raw_d
     # 7. Default recommender quality
     reporter.stage(f"Precision@{config.precision_k} (default)", 22)
     results["default"]["precision_at_k"] = evaluation.precision_at_k(
-        "euclidean", X_train_scaled, y_train_arr, X_test_scaled, y_test_arr, config.precision_k)
+        "euclidean", X_train_recommend, y_train_arr, X_test_recommend, y_test_arr, config.precision_k)
     reporter.log(f"Precision@{config.precision_k} (default recommender): "
                  f"{results['default']['precision_at_k']:.4f}")
     _check_cancel(reporter)
@@ -209,7 +224,7 @@ def run_training(config: TrainingConfig, reporter: Reporter | None = None, raw_d
     # 9. Cross validation of the default model
     if config.run_cv:
         reporter.stage("Cross validation", 40)
-        scores = cross_val_score(KNeighborsClassifier(n_neighbors=config.default_k),
+        scores = cross_val_score(KNeighborsClassifier(n_neighbors=config.default_k, metric="euclidean"),
                                  X_train_scaled, y_train_arr, cv=config.cv_folds, scoring="accuracy")
         results["cv"] = {"scores": scores, "mean": float(scores.mean()), "std": float(scores.std())}
         reporter.log(f"\n#### CROSS VALIDATION ({config.cv_folds}-fold)")
@@ -240,36 +255,38 @@ def run_training(config: TrainingConfig, reporter: Reporter | None = None, raw_d
     _log_metrics(reporter, results["tuned"]["metrics"])
     _check_cancel(reporter)
 
-    # Compare genre classifiers on exactly the same scaled training and test rows.
-    results["model_comparison"] = {"KNN": results["tuned"]}
-    for name, classifier in (
-        ("Decision Tree", DecisionTreeClassifier(random_state=config.random_state)),
-        ("Naïve Bayes", GaussianNB()),
-    ):
-        reporter.stage(f"Comparing {name}", 92)
-        classifier.fit(X_train_scaled, y_train_arr)
-        results["model_comparison"][name] = _evaluate(
-            classifier, X_test_scaled, y_test_arr, n_classes, class_names)
-        reporter.log(f"\n#### {name.upper()} (genre classification)")
-        _log_metrics(reporter, results["model_comparison"][name]["metrics"])
-        _check_cancel(reporter)
-    best_accuracy = max(r["metrics"]["Accuracy"] for r in results["model_comparison"].values())
-    winners = [name for name, r in results["model_comparison"].items()
-               if r["metrics"]["Accuracy"] == best_accuracy]
-    reporter.log(f"\nHighest test accuracy: {', '.join(winners)} ({best_accuracy:.2%})")
-
-    # 12. Tuned recommender quality: only the metric carries over to NearestNeighbors.
+    # 12. Recommendation distances stay Euclidean; tuning K and weights changes genre voting only.
     best_metric = best_params["metric"]
     reporter.stage(f"Precision@{config.precision_k} (optimized)", 94)
     results["tuned"]["precision_at_k"] = evaluation.precision_at_k(
-        best_metric, X_train_scaled, y_train_arr, X_test_scaled, y_test_arr, config.precision_k)
+        best_metric, X_train_recommend, y_train_arr, X_test_recommend, y_test_arr, config.precision_k)
     reporter.log(f"Precision@{config.precision_k} (optimized recommender, {best_metric}): "
                  f"{results['tuned']['precision_at_k']:.4f}")
 
+    reporter.stage("Comparing KNN, K-Means and hierarchical recommendations", 95)
+    clusters, comparison, diagnostics = compare_recommenders(
+        X_train_recommend, y_train_arr, X_test_recommend, y_test_arr, metric=best_metric,
+        k=config.precision_k, n_clusters=config.n_clusters, random_state=config.random_state)
+    results["recommendation_comparison"] = comparison
+    results["clustering"] = diagnostics
+    reporter.log(f"Cluster count: {comparison['n_clusters']} ({comparison['cluster_selection']})")
+    reporter.log(f"\n#### RECOMMENDATION COMPARISON ({comparison['train_songs']} training, "
+                 f"{comparison['test_songs']} test songs; same sample for all methods)")
+    reporter.log(comparison["table"].to_string(index=False))
+    _check_cancel(reporter)
+
     # 13. Final recommender on the whole catalogue
     reporter.stage("Building recommender", 97)
-    catalogue_scaled = scaler.transform(X)
+    catalogue_scaled = np.hstack([scaler.transform(X),
+                                 genre_feature_encoder.transform(df[["track_genre"]])])
     recommender = NearestNeighbors(metric=best_metric).fit(catalogue_scaled)
+    cluster_models = {}
+    fitted_indices = X_train.index.to_numpy()[comparison["train_indices"]]
+    for name, cluster in clusters.items():
+        labels = cluster.predict(catalogue_scaled)
+        # Preserve fitted memberships; nearest-centroid assignment is for unseen songs only.
+        labels[fitted_indices] = cluster.labels
+        cluster_models[name] = replace(cluster, labels=labels)
     catalogue = df[INFO_COLUMNS + ALL_FEATURES].reset_index(drop=True)
     reporter.log(f"\nRecommender is ready. Songs in catalogue: {len(catalogue)}")
 
@@ -287,4 +304,6 @@ def run_training(config: TrainingConfig, reporter: Reporter | None = None, raw_d
         catalogue=catalogue,
         catalogue_scaled=catalogue_scaled,
         results=results,
+        cluster_models=cluster_models,
+        genre_feature_encoder=genre_feature_encoder,
     )

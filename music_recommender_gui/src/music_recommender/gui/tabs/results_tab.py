@@ -30,10 +30,7 @@ def _which_selector(on_change):
     tuned = QRadioButton("Optimized KNN")
     default = QRadioButton("Default KNN")
     tuned.setChecked(True)
-    tree = QRadioButton("Decision Tree")
-    bayes = QRadioButton("Naïve Bayes")
-    for button, key in ((tuned, "tuned"), (default, "default"),
-                        (tree, "Decision Tree"), (bayes, "Naïve Bayes")):
+    for button, key in ((tuned, "tuned"), (default, "default")):
         button.setProperty("results_key", key)
         group.addButton(button)
         row.addWidget(button)
@@ -147,13 +144,13 @@ class ResultsTab(QWidget):
             f" &nbsp;·&nbsp; Trained {model.created_at.replace('T', ' ')}")
         self.show_summary()
         self.draw_comparison()
-        self.show_classifier_comparison()
+        self.show_recommendation_comparison()
         self.draw_confusion_matrix()
         self.show_report()
         self.draw_k_sweep()
         self.draw_cv()
         self.show_grid()
-        self.views.setCurrentRow(self.classifier_view_index if "model_comparison" in model.results else 0)
+        self.views.setCurrentRow(self.classifier_view_index if "recommendation_comparison" in model.results else 0)
 
     # ---------- summary ----------
 
@@ -195,38 +192,36 @@ class ResultsTab(QWidget):
 
     # ---------- confusion matrix and per-genre report ----------
 
-    def show_classifier_comparison(self):
-        comparison = self.model.results.get("model_comparison")
+    def show_recommendation_comparison(self):
+        comparison = self.model.results.get("recommendation_comparison")
         self.classifier_plot.clear()
         if not comparison:
             self.classifier_model.set_dataframe(pd.DataFrame())
-            self.classifier_note.setText("Retrain this model to compare KNN, Decision Tree and Naïve Bayes.")
-            self.classifier_plot.message("Model comparison is unavailable in this saved model.")
+            self.classifier_note.setText("Retrain this model to compare KNN, K-Means and hierarchical recommendations.")
+            self.classifier_plot.message("Recommendation comparison is unavailable in this saved model.")
             return
-        table = pd.DataFrame([{"Model": name, **result["metrics"]}
-                              for name, result in comparison.items()])
-        table = table.sort_values("Accuracy", ascending=False, kind="stable").reset_index(drop=True)
+        score = f"Precision@{comparison['k']}"
+        table = comparison["table"].sort_values(score, ascending=False, kind="stable").reset_index(drop=True)
         self.classifier_model.set_dataframe(table)
-        best = table["Accuracy"].max()
-        winners = table.loc[table["Accuracy"] == best, "Model"].tolist()
-        knn_note = "grid-search optimized" if "grid" in self.model.results else "default settings"
+        best = table[score].max()
+        winners = table.loc[table[score] == best, "Model"].tolist()
         self.classifier_note.setText(
-            f"Highest test accuracy: {', '.join(winners)} ({best:.2%}). "
-            f"KNN: {knn_note}; Decision Tree and Naïve Bayes: default settings. "
-            "Same features and split for all models. This compares genre prediction, not recommendation quality.")
+            f"Highest {score}: {', '.join(winners)} ({best:.2%}). "
+            f"Same {comparison['train_songs']:,} training and {comparison['test_songs']:,} test songs; "
+            f"{comparison['n_clusters']} clusters. Scores measure same-genre recommendations. "
+            "Missing recommendations count as misses; coverage reports returned slots. "
+            "Genre is a recommendation input, so Precision@K reports genre consistency.")
         ax = self.classifier_plot.figure.add_subplot()
-        bars = ax.bar(table["Model"], table["Accuracy"],
-                      color=[TUNED_COLOR if a == best else DEFAULT_COLOR for a in table["Accuracy"]])
-        ax.bar_label(bars, labels=[f"{a:.2%}" for a in table["Accuracy"]])
+        bars = ax.bar(table["Model"], table[score],
+                      color=[TUNED_COLOR if a == best else DEFAULT_COLOR for a in table[score]])
+        ax.bar_label(bars, labels=[f"{a:.2%}" for a in table[score]])
         ax.set_ylim(0, 1.1)
-        ax.set_ylabel("Test accuracy")
-        ax.set_title("Genre classification: KNN vs Decision Tree vs Naïve Bayes")
+        ax.set_ylabel(score)
+        ax.set_title("Song recommendations: KNN vs K-Means vs Hierarchical")
         self.classifier_plot.draw()
 
     def _selected_result(self, which):
-        if which in ("default", "tuned"):
-            return self.model.results[which]
-        return self.model.results.get("model_comparison", {}).get(which)
+        return self.model.results.get(which)
 
     def draw_confusion_matrix(self):
         if self.model is None:

@@ -17,7 +17,6 @@ from PyQt6.QtWidgets import (
 )
 
 from ...core import recommender as rec
-from ...core.config import METRICS
 from ..widgets.dataframe_model import DataFrameModel, make_table_view
 from ..widgets.mpl_canvas import PlotWidget
 from ..widgets.song_picker import SongPicker
@@ -119,9 +118,8 @@ class RecommendTab(QWidget):
         self.metric.blockSignals(True)
         self.metric.clear()
         if model:
-            self.metric.addItem(f"Model default ({model.recommender_metric})", None)
-            for metric in METRICS:
-                self.metric.addItem(metric, metric)
+            self.metric.addItem("Euclidean distance", "euclidean")
+        self.metric.setEnabled(False)
         self.metric.blockSignals(False)
         self.song_index = None
         self.result = None
@@ -154,9 +152,11 @@ class RecommendTab(QWidget):
 
     def draw_profile(self):
         """Input song's scaled features next to the average of the recommendations."""
-        cols = self.model.feature_cols
+        cols = self.model.recommendation_feature_cols
         song = self.model.catalogue_scaled[self.song_index]
         recs = self.model.catalogue_scaled[self.result["song_index"].to_numpy()].mean(axis=0)
+        keep = [i for i in range(len(cols)) if i < len(self.model.feature_cols) or song[i] or recs[i]]
+        cols, song, recs = [cols[i] for i in keep], song[keep], recs[keep]
         y = np.arange(len(cols))
 
         self.plot.clear()
@@ -166,7 +166,7 @@ class RecommendTab(QWidget):
         ax.set_yticks(y, cols)
         ax.invert_yaxis()
         ax.set_xlabel("Scaled value")
-        ax.set_title("Feature profile")
+        ax.set_title("Audio and genre feature profile")
         ax.legend(loc="lower right")
         ax.grid(axis="x", linestyle="--", alpha=0.4)
         self.plot.draw()

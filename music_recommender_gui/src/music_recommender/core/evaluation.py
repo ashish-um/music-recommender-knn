@@ -48,9 +48,11 @@ def precision_at_k(metric, X_train, y_train, X_test, y_test, k=10) -> float:
     Training songs act as the catalogue and test songs as queries, so the songs
     being scored were never seen by the model.
     """
-    model = NearestNeighbors(metric=metric)
+    if metric != "euclidean":
+        raise ValueError("Only Euclidean distance is supported.")
+    model = NearestNeighbors(metric="euclidean")
     model.fit(X_train)
-    _, indices = model.kneighbors(X_test, n_neighbors=k)
+    _, indices = model.kneighbors(X_test, n_neighbors=min(k, len(X_train)))
 
     train_genres = np.asarray(y_train)
     test_genres = np.asarray(y_test)
@@ -63,7 +65,7 @@ def k_sweep(X_train, y_train, X_test, y_test, k_values) -> list[tuple[int, float
     """Test accuracy of KNeighborsClassifier for every K."""
     results = []
     for k in k_values:
-        model = KNeighborsClassifier(n_neighbors=k)
+        model = KNeighborsClassifier(n_neighbors=k, metric="euclidean")
         model.fit(X_train, y_train)
         results.append((k, accuracy_score(y_test, model.predict(X_test))))
     return results

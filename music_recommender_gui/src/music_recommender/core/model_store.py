@@ -34,6 +34,14 @@ class TrainedModel:
     created_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     sklearn_version: str = sklearn.__version__
     format_version: int = FORMAT_VERSION
+    cluster_models: dict = field(default_factory=dict)
+    genre_feature_encoder: object = None
+
+    @property
+    def recommendation_feature_cols(self) -> list[str]:
+        encoder = getattr(self, "genre_feature_encoder", None)
+        return self.feature_cols + ([f"Genre: {genre}" for genre in encoder.categories_[0]]
+                                    if encoder is not None else [])
 
     @property
     def n_songs(self) -> int:
@@ -81,7 +89,11 @@ def load_model(path) -> tuple[TrainedModel, list[str]]:
 
     if not isinstance(model, TrainedModel):
         raise ModelFileError(f"{path.name} is not a model saved by Music Recommender.")
+    if model.recommender_metric != "euclidean" or model.best_params.get("metric") != "euclidean":
+        raise ModelFileError("This model uses another distance metric. Retrain using Euclidean distance.")
     if model.sklearn_version != sklearn.__version__ or caught:
         notes.append(f"The model was trained with scikit-learn {model.sklearn_version}, "
                      f"but {sklearn.__version__} is installed. Retrain if results look wrong.")
+    if getattr(model, "genre_feature_encoder", None) is None:
+        notes.append("This model uses audio features only. Retrain to include genre in recommendations.")
     return model, notes

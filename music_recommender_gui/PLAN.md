@@ -12,8 +12,8 @@ This plan turns the notebook `Music_Recommendation_KNN.ipynb` (described in `../
 ## 1. Goals and non-goals
 
 ### Goals
-- **Same results as the notebook.** With default settings, the app must reproduce the notebook's numbers exactly: Accuracy 0.5756 → 0.6183, Precision@10 0.4936 → 0.5048, best params `{metric: manhattan, n_neighbors: 25, weights: distance}`. This is the main correctness check.
-- **Responsive UI.** Loading the CSV and running Grid Search (270 fits) happen in a background thread, with a progress bar and a live log. The window never freezes.
+- **Shared pipeline.** The previous seven genres are selected by default. Recommendations combine scaled audio with one-hot genre; genre prediction remains audio only. Fast regression tests use an explicit seven-genre subset; full-catalogue results are recorded in the executed notebook.
+- **Responsive UI.** Loading the CSV and running Grid Search (90 fits) happen in a background thread, with a progress bar and a live log. The window never freezes.
 - **Train once, use many times.** A trained model is saved to a `.joblib` file and reloaded at startup, so you don't have to retrain every time you open the app.
 - **Fix the limitations listed in implementation.md §7** where the GUI makes this easy:
   - *Duplicate names:* search by "Title — Artist" with autocomplete instead of the first exact name match.
@@ -94,7 +94,7 @@ Mini Project/
 ### 4.1 `config.py`
 - `ALL_FEATURE_COLS`: the 12 notebook features plus the optional `popularity`, `key`, `time_signature` (off by default, since the notebook found they lower accuracy).
 - `DEFAULT_FEATURES`: the 12 features from §5.3 Step 9.
-- `DEFAULT_GENRES = ["classical", "hip-hop", "heavy-metal", "edm", "jazz", "country", "pop"]`
+- `DEFAULT_GENRES` selects classical, hip-hop, heavy-metal, EDM, jazz, country and pop.
 - `DEFAULT_PARAM_GRID`: the grid from §5.6.2.
 - `@dataclass TrainingConfig`: `dataset_path`, `genres`, `features`, `test_size=0.2`, `random_state=42`, `stratify=True`, `scaler="minmax"`, `default_k=5`, `run_cv=True`, `cv_folds=5`, `run_grid_search=True`, `param_grid`, `run_k_sweep=True`, `k_sweep_range=(1, 30)`, `precision_k=10`, `n_jobs=-1`.
 
@@ -171,7 +171,7 @@ All functions take a `TrainedModel`:
 │                         (active tab content)                            │
 │                                                                         │
 ├─────────────────────────────────────────────────────────────────────────┤
-│ Model: knn_2026-10-22.joblib · 7 genres · 4,925 songs · Acc 61.83%      │
+│ Model: knn_2026-10-22.joblib · 7 genres · 4,925 songs · Acc 61.22%      │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -211,12 +211,12 @@ Dataset: [../dataset.csv                     ] [Browse]   ✓ 114,000 rows loade
 │  (searchable checklist │ │ Scaler: (•) MinMax ( ) Std  │ │ ☑ Grid search                   │
 │   of all 114 genres)   │ │ Precision@K, K: [10]        │ │   K values: [3,5,7,9,11,15,...] │
 │ Features: [12 sel. ▾]  │ │ ☑ K sweep 1 – [30]          │ │   weights: ☑uniform ☑distance   │
-│ Test size: [0.20]      │ │                             │ │   metric: ☑eucl ☑manh ☑cosine   │
-│ Random state: [42]     │ │                             │ │   → 54 combinations, 270 fits   │
+│ Test size: [0.20]      │ │                             │ │   metric: Euclidean (fixed)   │
+│ Random state: [42]     │ │                             │ │   → 18 combinations, 90 fits   │
 │ ☑ Stratify             │ │                             │ │ CPU cores: [all ▾]              │
 └────────────────────────┘ └─────────────────────────────┘ └─────────────────────────────────┘
 [Restore notebook defaults]                          [▶ Train]  [■ Cancel]
-Stage: Grid search (132/270 fits)   [██████████░░░░░░░░░░] 48%
+Stage: Grid search (132/90 fits)   [██████████░░░░░░░░░░] 48%
 ┌ Log ───────────────────────────────────────────────────────────────────────────────────────┐
 │ Number of samples: 114000 … Duplicate track_id: 255 … Best Parameters: {...}               │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -276,9 +276,9 @@ Each milestone ends in something runnable and checked before the next one starts
 ## 7. Verification
 
 1. **Numerical parity (automated):** with the default `TrainingConfig`:
-   - default accuracy is 0.5756 and tuned accuracy 0.6183 (±1e-4)
-   - Precision@10 is 0.4936 → 0.5048
-   - best params are `manhattan / 25 / distance`
+   - default accuracy is 0.5756 and tuned accuracy 0.6122 (±1e-4)
+   - Precision@10 is 1.0000 → 1.0000 for the seven-genre fixture with genre inputs
+   - best params are `euclidean / 15 / distance`
    - cleaned catalogue has 4,925 songs and the split is 3,940 / 985
 2. **Behaviour tests:**
    - unknown song search returns empty, with no crash
@@ -339,4 +339,4 @@ uv run music-recommender
 
 1. **Qt binding:** **PyQt6 in a uv-managed venv**, or the system PyQt5 that is already installed.
 2. **Subdirectory name:** **`music_recommender_gui/`**.
-3. **Scope:** current app pages are Recommend, Train, Results, Dataset and About. The Predict Genre page was removed; genre classifiers remain available in model comparison results.
+3. **Scope:** current app pages are Recommend, Train, Results, Dataset and About. The Predict Genre page was removed; KNN genre metrics remain available; model comparison now evaluates KNN, K-Means and hierarchical recommendations.

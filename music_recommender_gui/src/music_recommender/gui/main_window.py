@@ -37,7 +37,7 @@ ABOUT_TEXT = (
     "<p>Mini Project: Artificial Intelligence &amp; Machine Learning (PCC-302-ITT)<br>"
     "Savitribai Phule Pune University, TE Information Technology (2024 Course)</p>"
     "<p>Content-based music recommendations using KNN on the Spotify Tracks Dataset,<br>"
-    "with KNN, Decision Tree and Naïve Bayes genre classification.</p>"
+    "with K-Means and hierarchical recommendation comparisons.</p>"
     "<h3>Developed by</h3>"
     "<p>Ashish Umrao<br>Abhijeet Kumar<br>Aryan Singh</p>"
     "<p>Checked by: वैशाली इंगळे</p>"
@@ -45,7 +45,7 @@ ABOUT_TEXT = (
 PAGE_DESCRIPTIONS = {
     "Recommend": "Find songs with a similar sound. Start with a title or an artist.",
     "Train": "Choose your data, configure the models and follow their progress.",
-    "Results": "Compare classifiers and explore how your models perform.",
+    "Results": "Compare recommendation methods and explore how your models perform.",
     "Dataset": "Get to know your catalogue, from cleaning steps to audio features.",
     "About": "The project and the people behind it.",
 }
@@ -355,7 +355,7 @@ class MainWindow(QMainWindow):
                 f"<b>Trained:</b> {self.model.created_at.replace('T', ' ')} with scikit-learn "
                 f"{self.model.sklearn_version}<br>"
                 f"<b>Songs:</b> {self.model.n_songs:,} &nbsp; <b>Genres:</b> {', '.join(self.model.genre_classes)}<br>"
-                f"<b>Features:</b> {', '.join(self.model.feature_cols)}<br>"
+                f"<b>Features:</b> {', '.join(self.model.recommendation_feature_cols)}<br>"
                 f"<b>Best parameters:</b> {self.model.best_params}<br>"
                 f"<b>Recommender metric:</b> {self.model.recommender_metric}")
         box = QMessageBox(QMessageBox.Icon.Information, "Model info", text, parent=self)

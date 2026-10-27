@@ -32,10 +32,10 @@ REQUIRED_COLUMNS = INFO_COLUMNS + ALL_FEATURES
 DEFAULT_PARAM_GRID = {
     "n_neighbors": [3, 5, 7, 9, 11, 15, 21, 25, 31],
     "weights": ["uniform", "distance"],
-    "metric": ["euclidean", "manhattan", "cosine"],
+    "metric": ["euclidean"],
 }
 
-METRICS = ["euclidean", "manhattan", "cosine"]
+METRICS = ["euclidean"]
 WEIGHTS = ["uniform", "distance"]
 SCALERS = ["minmax", "standard"]
 
@@ -72,7 +72,7 @@ class TrainingConfig:
     """Every setting of the training pipeline. Defaults reproduce the notebook."""
 
     dataset_path: str = str(DEFAULT_DATASET_PATH)
-    genres: list[str] = field(default_factory=lambda: list(DEFAULT_GENRES))
+    genres: list[str] | None = field(default_factory=lambda: list(DEFAULT_GENRES))
     features: list[str] = field(default_factory=lambda: list(DEFAULT_FEATURES))
     test_size: float = 0.2
     random_state: int = 42
@@ -87,6 +87,7 @@ class TrainingConfig:
     run_grid_search: bool = True
     param_grid: dict = field(default_factory=lambda: {k: list(v) for k, v in DEFAULT_PARAM_GRID.items()})
     n_jobs: int = -1
+    n_clusters: int | None = 7
 
     def grid_size(self) -> int:
         size = 1
@@ -97,7 +98,7 @@ class TrainingConfig:
     def validate(self) -> list[str]:
         """Return a list of problems with the settings (empty if all is fine)."""
         problems = []
-        if len(self.genres) < 2:
+        if self.genres is not None and len(self.genres) < 2:
             problems.append("Select at least 2 genres.")
         if not self.features:
             problems.append("Select at least 1 feature.")
@@ -107,9 +108,13 @@ class TrainingConfig:
             problems.append("Default K must be at least 1.")
         if self.precision_k < 1:
             problems.append("Precision@K must be at least 1.")
+        if self.n_clusters is not None and self.n_clusters < 2:
+            problems.append("Select at least 2 clusters.")
         if self.run_cv and self.cv_folds < 2:
             problems.append("Cross validation needs at least 2 folds.")
         if self.run_grid_search:
+            if self.param_grid.get("metric") != ["euclidean"]:
+                problems.append("Only Euclidean distance is supported.")
             if self.cv_folds < 2:
                 problems.append("Grid search needs at least 2 CV folds.")
             for key in ("n_neighbors", "weights", "metric"):

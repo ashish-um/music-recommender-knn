@@ -53,6 +53,8 @@ def clean_dataset(df: pd.DataFrame, genres) -> tuple[pd.DataFrame, CleaningRepor
     df = df.dropna()
     report.add("Removed missing values", len(df))
 
+    if genres is None:
+        genres = sorted(df["track_genre"].unique())
     df = df[df["track_genre"].isin(genres)].reset_index(drop=True)
     report.add(f"Kept {len(genres)} genres", len(df))
     if df.empty:
